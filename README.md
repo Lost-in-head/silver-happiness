@@ -1,0 +1,1 @@
+The idea is to create a chatbot that can be deployed onto different platforms that will interact with users and work towards a goal that will be determined at a later date or changeed for the specific platform it is deployed on.
