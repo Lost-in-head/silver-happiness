@@ -1,0 +1,12 @@
+# Optional: run bot with env file and volume for data
+# Usage: docker-compose run --rm bot ask "Hello"
+#        docker-compose run --rm bot run --once
+services:
+  bot:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml
+    stdin_open: true
+    tty: true

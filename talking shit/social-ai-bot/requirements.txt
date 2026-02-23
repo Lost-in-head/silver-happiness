@@ -1,0 +1,20 @@
+# Core bot: LLM + RAG
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+chromadb>=0.5.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# Document loading for teaching
+unstructured>=0.14.0
+pypdf>=5.0.0
+
+# CLI
+click>=8.0.0
+
+# Platform automation (step 2)
+playwright>=1.49.0
+
+# Orchestrator (step 4)
+schedule>=1.2.0

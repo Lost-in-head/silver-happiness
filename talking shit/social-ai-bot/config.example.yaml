@@ -1,0 +1,36 @@
+# Copy to config.yaml and fill in. Secrets via env vars preferred.
+
+# LLM (use env OPENAI_API_KEY or set below)
+llm:
+  provider: openai  # openai | ollama | groq
+  model: gpt-4o-mini
+  # ollama base_url: http://localhost:11434
+  # groq base_url: https://api.groq.com/openai/v1
+
+# RAG
+rag:
+  persist_directory: ./data/chroma
+  collection_name: bot_knowledge
+  embedding_model: text-embedding-3-small  # OpenAI; or use Ollama embeddings
+  top_k: 4
+
+# Conversation memory
+memory:
+  window_size: 10  # last N message pairs in context
+
+# Platform credentials (prefer env: REDDIT_USERNAME, REDDIT_PASSWORD, etc.)
+platforms:
+  reddit:
+    username: ""
+    password: ""
+    # Optional 2FA handled via session/cookies if needed
+
+# Geolocation
+geolocation:
+  target_country: US
+  timezone_id: America/New_York
+  locale: en-US
+  # proxy_url: http://proxy.example.com:8080  # optional; set for geo
+  # For proxy auth use PROXY_USERNAME and PROXY_PASSWORD (env or below); Playwright does not parse user:pass in URL.
+  # proxy_username: ""
+  # proxy_password: ""
