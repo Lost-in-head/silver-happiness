@@ -67,7 +67,7 @@ def ask(message):
 
 
 @main.command()
-@click.argument("path", type=click.Path(exists=True), default="data/knowledge")
+@click.argument("path", type=click.Path(), default="data/knowledge")
 @click.option("--file", "file_path", type=click.Path(exists=True), help="Ingest a single file instead of directory.")
 def teach(path, file_path):
     """Ingest documents from a directory or file into the knowledge base."""
