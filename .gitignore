@@ -17,7 +17,6 @@ ENV/
 
 # Bot config with real credentials (keep config.example.yaml tracked)
 talking shit/social-ai-bot/config.yaml
-
 # Bot data (vector store, queue, knowledge)
 talking shit/social-ai-bot/data/
 
