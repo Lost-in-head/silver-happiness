@@ -1,0 +1,28 @@
+# Secrets — NEVER bake these into the image
+.env
+.env.*
+
+# Runtime data — mounted as volumes at runtime
+data/
+config.yaml
+
+# Python cruft
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Tests — not needed in production image
+tests/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*~

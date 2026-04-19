@@ -10,19 +10,24 @@ venv/
 env/
 ENV/
 
-# Environment / secrets (keep .env.example tracked)
+# Secrets — never commit these
 .env
 .env.local
 .env.*.local
 
-# Bot config with real credentials (keep config.example.yaml tracked)
-talking shit/social-ai-bot/config.yaml
+# Bot config with real credentials (track only the .example files)
+social/config.yaml
 
-# Bot data (vector store, queue, knowledge)
-talking shit/social-ai-bot/data/
-
-# Chroma (if stored elsewhere)
+# Bot runtime data (vector store, queue, knowledge, dead letter)
+social/data/
 data/
+
+# HuggingFace model cache
+.cache/
+
+# Old folder paths (kept for git history)
+talking shit/social-ai-bot/config.yaml
+talking shit/social-ai-bot/data/
 
 # Distribution / packaging
 *.egg-info/

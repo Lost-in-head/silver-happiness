@@ -1,0 +1,16 @@
+# Usage examples:
+#   docker-compose run --rm bot ask "What do you know?"
+#   docker-compose run --rm bot teach data/knowledge
+#   docker-compose run --rm bot queue --action post --prompt "Write an intro" --subreddit test
+#   docker-compose run --rm bot run --once
+#   docker-compose run --rm bot run --interval 300
+
+services:
+  bot:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    stdin_open: true
+    tty: true

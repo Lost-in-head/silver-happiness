@@ -1,0 +1,36 @@
+# Copy to config.yaml and fill in. Secrets belong in .env, not here.
+
+# LLM — powered by OpenRouter (https://openrouter.ai)
+# Set OPENROUTER_API_KEY in .env. Pick any model from https://openrouter.ai/models
+llm:
+  provider: openrouter          # openrouter | ollama
+  model: openai/gpt-4o-mini    # any OpenRouter model string
+  # For Ollama (local, no API key):
+  # provider: ollama
+  # model: llama3
+  # Set OLLAMA_BASE_URL in .env if not on localhost:11434
+
+# RAG — uses local HuggingFace embeddings (no API key, ~80MB download on first use)
+rag:
+  persist_directory: ./data/chroma
+  collection_name: bot_knowledge
+  embedding_model: all-MiniLM-L6-v2   # fast, accurate, free
+  top_k: 4                             # chunks retrieved per query
+
+# Conversation memory
+memory:
+  window_size: 10   # last N message pairs kept in context
+
+# Platform credentials (prefer env vars: REDDIT_USERNAME, REDDIT_PASSWORD)
+platforms:
+  reddit:
+    username: ""
+    password: ""
+
+# Geolocation — applied to browser context for all platform adapters
+geolocation:
+  target_country: US
+  timezone_id: America/New_York
+  locale: en-US
+  # proxy_url: http://proxy.example.com:8080   # optional; set via PROXY_URL in .env
+  # proxy_username and proxy_password via env: PROXY_USERNAME, PROXY_PASSWORD
