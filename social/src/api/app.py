@@ -69,6 +69,8 @@ _MAX_SESSIONS: int = int(os.environ.get("MAX_SESSIONS", "1000"))
 _session_store: SessionStore | None = None
 _shared_config: dict[str, Any] | None = None
 
+_REAP_INTERVAL = 300  # seconds between background sweep cycles
+
 
 def _start_rate_window_reaper(stop: threading.Event) -> threading.Thread:
     """
@@ -88,9 +90,6 @@ def _start_rate_window_reaper(stop: threading.Event) -> threading.Thread:
     t = threading.Thread(target=_run, daemon=True, name="rate-window-reaper")
     t.start()
     return t
-
-
-_REAP_INTERVAL = 300  # seconds between rate-window sweeps
 
 
 @asynccontextmanager
