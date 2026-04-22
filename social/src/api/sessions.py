@@ -143,14 +143,17 @@ class SessionStore:
 # Background reaper thread
 # ------------------------------------------------------------------ #
 
-def start_reaper(store: SessionStore, interval: float = _REAP_INTERVAL_SECONDS) -> threading.Thread:
+def start_reaper(store: SessionStore, interval: float = _REAP_INTERVAL_SECONDS) -> threading.Event:
     """
     Start a daemon thread that periodically calls ``store.reap_expired()``.
-    The thread is non-blocking and will stop automatically when the process exits.
+
+    Returns the ``threading.Event`` that can be set to stop the thread
+    gracefully during application shutdown.
     """
+    stop = threading.Event()
+
     def _run() -> None:
-        while True:
-            time.sleep(interval)
+        while not stop.wait(timeout=interval):
             try:
                 store.reap_expired()
             except Exception:
@@ -159,4 +162,4 @@ def start_reaper(store: SessionStore, interval: float = _REAP_INTERVAL_SECONDS) 
     t = threading.Thread(target=_run, daemon=True, name="session-reaper")
     t.start()
     logger.info("Session reaper started (interval=%ds, ttl=%ds).", interval, store._ttl)
-    return t
+    return stop

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -69,12 +70,36 @@ _session_store: SessionStore | None = None
 _shared_config: dict[str, Any] | None = None
 
 
+def _start_rate_window_reaper(stop: threading.Event) -> threading.Thread:
+    """
+    Periodically remove idle IP entries from _rate_windows to prevent
+    unbounded memory growth.  Runs every 5 minutes as a daemon thread.
+    """
+    def _run() -> None:
+        while not stop.wait(timeout=_REAP_INTERVAL):
+            now = time.monotonic()
+            evict_before = now - _RATE_IDLE_EVICT_SECONDS
+            stale = [ip for ip, ts in _rate_windows.items() if not ts or max(ts) < evict_before]
+            for ip in stale:
+                del _rate_windows[ip]
+            if stale:
+                logger.debug("Rate-window reaper removed %d stale IP(s).", len(stale))
+
+    t = threading.Thread(target=_run, daemon=True, name="rate-window-reaper")
+    t.start()
+    return t
+
+
+_REAP_INTERVAL = 300  # seconds between rate-window sweeps
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _session_store, _shared_config
     _shared_config = load_config()
     _session_store = SessionStore(ttl_seconds=_SESSION_TTL, max_sessions=_MAX_SESSIONS)
-    start_reaper(_session_store)
+    _stop_event = start_reaper(_session_store)
+    _start_rate_window_reaper(_stop_event)
     if not _AUTH_ENABLED:
         logger.warning(
             "API_KEYS is not set — authentication is DISABLED. "
@@ -87,7 +112,7 @@ async def lifespan(app: FastAPI):
         _RATE_LIMIT_RPM,
     )
     yield
-    # Cleanup (if any) on shutdown goes here
+    _stop_event.set()  # signal reaper threads to stop
 
 
 # ---------------------------------------------------------------------------
@@ -123,17 +148,19 @@ app.add_middleware(
 # Rate limiting — sliding window per IP address
 # ---------------------------------------------------------------------------
 
-# {ip: [(timestamp, ...), ...]}
+# {ip: [timestamp, ...]} — stale IPs are periodically purged in lifespan
 _rate_windows: dict[str, list[float]] = defaultdict(list)
+_RATE_WINDOW_SECONDS = 60.0
+# Purge IPs that have been idle for longer than this many seconds
+_RATE_IDLE_EVICT_SECONDS = 300.0
 
 
 def _check_rate_limit(ip: str) -> None:
     """Raise 429 if IP exceeds RATE_LIMIT_RPM requests in the last 60 seconds."""
     now = time.monotonic()
-    window = _rate_windows[ip]
-    # Purge timestamps older than 60 s
-    cutoff = now - 60.0
-    _rate_windows[ip] = [t for t in window if t > cutoff]
+    cutoff = now - _RATE_WINDOW_SECONDS
+    # Keep only timestamps within the current window
+    _rate_windows[ip] = [t for t in _rate_windows[ip] if t > cutoff]
     if len(_rate_windows[ip]) >= _RATE_LIMIT_RPM:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
