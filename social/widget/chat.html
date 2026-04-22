@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Widget</title>
+  <!--
+    ===================================================================
+    Social AI Bot — Embeddable Chat Widget
+    ===================================================================
+    Embed this widget on any page in one of two ways:
+
+    OPTION 1 — iframe (zero conflict with host styles):
+      <iframe src="chat.html?api=https://your-api.example.com&key=YOUR_API_KEY"
+              width="380" height="600" frameborder="0"></iframe>
+
+    OPTION 2 — floating bubble (self-contained; paste before </body>):
+      <script>
+        window.ChatWidgetConfig = {
+          apiBase: "https://your-api.example.com",
+          apiKey:  "YOUR_API_KEY",   // omit if auth is disabled
+        };
+      </script>
+      <script src="chat.js"></script>  <!-- extracted version of this file -->
+
+    CONFIGURATION (URL query params or window.ChatWidgetConfig):
+      api       – Base URL of the bot API (required).
+      key       – X-API-Key value (optional; only needed if auth is enabled).
+      title     – Widget header title (default: "Ask me anything").
+      theme     – "light" | "dark" (default: "light").
+    ===================================================================
+  -->
+  <style>
+    /* ----------------------------------------------------------------
+       Reset + tokens
+    ---------------------------------------------------------------- */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --cw-bg:        #ffffff;
+      --cw-surface:   #f5f5f5;
+      --cw-primary:   #2563eb;
+      --cw-primary-h: #1d4ed8;
+      --cw-text:      #1a1a1a;
+      --cw-muted:     #6b7280;
+      --cw-border:    #e5e7eb;
+      --cw-bubble-user:  #2563eb;
+      --cw-bubble-bot:   #f0f0f0;
+      --cw-bubble-user-text: #ffffff;
+      --cw-bubble-bot-text:  #1a1a1a;
+      --cw-radius:    12px;
+      --cw-shadow:    0 4px 24px rgba(0,0,0,.12);
+      --cw-font:      system-ui, -apple-system, sans-serif;
+    }
+
+    body.dark {
+      --cw-bg:        #1e1e2e;
+      --cw-surface:   #2a2a3e;
+      --cw-primary:   #6d8ef0;
+      --cw-primary-h: #4e6ee0;
+      --cw-text:      #e8e8f0;
+      --cw-muted:     #9ca3af;
+      --cw-border:    #3a3a4e;
+      --cw-bubble-user:  #6d8ef0;
+      --cw-bubble-bot:   #2a2a3e;
+      --cw-bubble-user-text: #ffffff;
+      --cw-bubble-bot-text:  #e8e8f0;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: var(--cw-font);
+      background: var(--cw-bg);
+      color: var(--cw-text);
+    }
+
+    /* ----------------------------------------------------------------
+       Layout
+    ---------------------------------------------------------------- */
+    #chat-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      background: var(--cw-bg);
+      border: 1px solid var(--cw-border);
+      border-radius: var(--cw-radius);
+      overflow: hidden;
+      box-shadow: var(--cw-shadow);
+    }
+
+    /* Header */
+    #chat-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      background: var(--cw-primary);
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    #chat-header .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    #chat-header .title {
+      font-weight: 600;
+      font-size: 15px;
+      flex: 1;
+    }
+
+    #btn-clear {
+      background: none;
+      border: 1px solid rgba(255,255,255,.4);
+      color: #fff;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    #btn-clear:hover { background: rgba(255,255,255,.15); }
+
+    /* Messages */
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scroll-behavior: smooth;
+    }
+
+    .message-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      animation: fadeUp .2s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-row.user  { flex-direction: row-reverse; }
+    .message-row.bot   { flex-direction: row; }
+
+    .bubble {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.5;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .message-row.user .bubble {
+      background: var(--cw-bubble-user);
+      color: var(--cw-bubble-user-text);
+      border-bottom-right-radius: 4px;
+    }
+    .message-row.bot .bubble {
+      background: var(--cw-bubble-bot);
+      color: var(--cw-bubble-bot-text);
+      border-bottom-left-radius: 4px;
+    }
+
+    /* Typing indicator */
+    .typing-dots {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+      padding: 4px 0;
+    }
+    .typing-dots span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cw-muted);
+      animation: blink 1.2s infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .2s; }
+    .typing-dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes blink {
+      0%, 80%, 100% { opacity: .3; }
+      40%           { opacity: 1;  }
+    }
+
+    /* Error notice */
+    .error-notice {
+      font-size: 12px;
+      color: #dc2626;
+      padding: 4px 8px;
+      background: #fee2e2;
+      border-radius: 8px;
+      max-width: 80%;
+      align-self: center;
+    }
+    body.dark .error-notice {
+      color: #fca5a5;
+      background: #3b0000;
+    }
+
+    /* Input area */
+    #input-area {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--cw-border);
+      background: var(--cw-bg);
+      flex-shrink: 0;
+    }
+
+    #user-input {
+      flex: 1;
+      border: 1px solid var(--cw-border);
+      border-radius: 20px;
+      padding: 9px 14px;
+      font-size: 14px;
+      font-family: var(--cw-font);
+      background: var(--cw-surface);
+      color: var(--cw-text);
+      resize: none;
+      outline: none;
+      transition: border-color .15s;
+      max-height: 120px;
+      overflow-y: auto;
+      line-height: 1.4;
+    }
+    #user-input:focus { border-color: var(--cw-primary); }
+    #user-input::placeholder { color: var(--cw-muted); }
+
+    #btn-send {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: none;
+      background: var(--cw-primary);
+      color: #fff;
+      cursor: pointer;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .15s, transform .1s;
+    }
+    #btn-send:hover   { background: var(--cw-primary-h); }
+    #btn-send:active  { transform: scale(.93); }
+    #btn-send:disabled {
+      background: var(--cw-border);
+      cursor: not-allowed;
+    }
+    #btn-send svg { pointer-events: none; }
+
+    /* Empty state */
+    #empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      gap: 8px;
+      color: var(--cw-muted);
+      font-size: 14px;
+      padding: 24px;
+      text-align: center;
+    }
+    #empty-state .icon { font-size: 36px; }
+  </style>
+</head>
+<body>
+<div id="chat-container">
+  <div id="chat-header">
+    <div class="avatar">🤖</div>
+    <span class="title" id="chat-title">Ask me anything</span>
+    <button id="btn-clear" title="Clear conversation">Clear</button>
+  </div>
+
+  <div id="messages">
+    <div id="empty-state">
+      <span class="icon">💬</span>
+      <span>Start a conversation below.</span>
+    </div>
+  </div>
+
+  <div id="input-area">
+    <textarea
+      id="user-input"
+      rows="1"
+      placeholder="Type a message…"
+      aria-label="Your message"
+    ></textarea>
+    <button id="btn-send" aria-label="Send message" title="Send (Enter)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ------------------------------------------------------------------
+     Config — URL params > window.ChatWidgetConfig > defaults
+  ------------------------------------------------------------------ */
+  const params  = new URLSearchParams(window.location.search);
+  const extConf = window.ChatWidgetConfig || {};
+
+  const API_BASE  = (params.get("api")   || extConf.apiBase  || "http://localhost:8000").replace(/\/$/, "");
+  const API_KEY   =  params.get("key")   || extConf.apiKey   || "";
+  const TITLE     =  params.get("title") || extConf.title    || "Ask me anything";
+  const THEME     =  params.get("theme") || extConf.theme    || "light";
+
+  /* ------------------------------------------------------------------
+     Apply config
+  ------------------------------------------------------------------ */
+  document.getElementById("chat-title").textContent = TITLE;
+  if (THEME === "dark") document.body.classList.add("dark");
+
+  /* ------------------------------------------------------------------
+     State
+  ------------------------------------------------------------------ */
+  let sessionId   = sessionStorage.getItem("cw_session_id") || null;
+  let isBusy      = false;
+  let hasMessages = false;
+
+  /* ------------------------------------------------------------------
+     DOM refs
+  ------------------------------------------------------------------ */
+  const $messages  = document.getElementById("messages");
+  const $input     = document.getElementById("user-input");
+  const $btnSend   = document.getElementById("btn-send");
+  const $btnClear  = document.getElementById("btn-clear");
+  const $emptyState = document.getElementById("empty-state");
+
+  /* ------------------------------------------------------------------
+     Helpers
+  ------------------------------------------------------------------ */
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function scrollBottom() {
+    $messages.scrollTop = $messages.scrollHeight;
+  }
+
+  function setBusy(busy) {
+    isBusy = busy;
+    $btnSend.disabled  = busy;
+    $input.disabled    = busy;
+  }
+
+  function hideEmptyState() {
+    if (!hasMessages) {
+      $emptyState.style.display = "none";
+      hasMessages = true;
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     Message rendering
+  ------------------------------------------------------------------ */
+  function appendMessage(role, text) {
+    hideEmptyState();
+    const row = document.createElement("div");
+    row.className = "message-row " + role;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.innerHTML = escapeHtml(text);
+    row.appendChild(bubble);
+    $messages.appendChild(row);
+    scrollBottom();
+    return bubble;
+  }
+
+  function appendError(text) {
+    hideEmptyState();
+    const el = document.createElement("div");
+    el.className = "error-notice";
+    el.textContent = text;
+    $messages.appendChild(el);
+    scrollBottom();
+  }
+
+  function showTyping() {
+    hideEmptyState();
+    const row = document.createElement("div");
+    row.className = "message-row bot";
+    row.id = "typing-row";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+    row.appendChild(bubble);
+    $messages.appendChild(row);
+    scrollBottom();
+    return row;
+  }
+
+  function removeTyping() {
+    const row = document.getElementById("typing-row");
+    if (row) row.remove();
+  }
+
+  /* ------------------------------------------------------------------
+     API call
+  ------------------------------------------------------------------ */
+  async function sendMessage(text) {
+    if (isBusy || !text.trim()) return;
+    setBusy(true);
+    appendMessage("user", text);
+    const typingRow = showTyping();
+
+    const body = { message: text, use_rag: true };
+    if (sessionId) body.session_id = sessionId;
+
+    const headers = { "Content-Type": "application/json" };
+    if (API_KEY) headers["X-API-Key"] = API_KEY;
+
+    try {
+      const res = await fetch(API_BASE + "/chat", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      removeTyping();
+
+      if (!res.ok) {
+        let detail = "Request failed (" + res.status + ").";
+        try {
+          const err = await res.json();
+          if (err.detail) detail = err.detail;
+        } catch (_) {}
+
+        if (res.status === 401) {
+          appendError("Authentication failed. Check your API key.");
+        } else if (res.status === 429) {
+          appendError("You're sending messages too quickly. Please wait a moment.");
+        } else {
+          appendError("Error: " + detail);
+        }
+        return;
+      }
+
+      const data = await res.json();
+      sessionId = data.session_id;
+      sessionStorage.setItem("cw_session_id", sessionId);
+      appendMessage("bot", data.reply);
+
+    } catch (err) {
+      removeTyping();
+      appendError("Could not reach the bot API. Is the server running?");
+      console.error("[ChatWidget]", err);
+    } finally {
+      setBusy(false);
+      $input.focus();
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     Clear conversation
+  ------------------------------------------------------------------ */
+  async function clearConversation() {
+    if (isBusy) return;
+
+    if (sessionId) {
+      const headers = {};
+      if (API_KEY) headers["X-API-Key"] = API_KEY;
+      try {
+        await fetch(API_BASE + "/sessions/" + encodeURIComponent(sessionId) + "/clear", {
+          method: "POST",
+          headers,
+        });
+      } catch (_) {}
+      sessionStorage.removeItem("cw_session_id");
+      sessionId = null;
+    }
+
+    // Reset UI
+    $messages.innerHTML = "";
+    const emptyClone = document.createElement("div");
+    emptyClone.id = "empty-state";
+    emptyClone.className = "";
+    emptyClone.innerHTML = '<span class="icon">💬</span><span>Start a conversation below.</span>';
+    $messages.appendChild(emptyClone);
+    hasMessages = false;
+    $input.value = "";
+    $input.style.height = "auto";
+    $input.focus();
+  }
+
+  /* ------------------------------------------------------------------
+     Event listeners
+  ------------------------------------------------------------------ */
+  $btnSend.addEventListener("click", () => {
+    const text = $input.value.trim();
+    if (!text) return;
+    $input.value = "";
+    $input.style.height = "auto";
+    sendMessage(text);
+  });
+
+  $input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const text = $input.value.trim();
+      if (!text) return;
+      $input.value = "";
+      $input.style.height = "auto";
+      sendMessage(text);
+    }
+  });
+
+  // Auto-grow textarea
+  $input.addEventListener("input", () => {
+    $input.style.height = "auto";
+    $input.style.height = Math.min($input.scrollHeight, 120) + "px";
+  });
+
+  $btnClear.addEventListener("click", clearConversation);
+
+  // Focus input on load
+  $input.focus();
+})();
+</script>
+</body>
+</html>
