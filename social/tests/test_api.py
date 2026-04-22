@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 import uuid
 from unittest.mock import MagicMock, patch
@@ -15,17 +16,53 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 
-def _make_app(api_keys: str = "", cors_origins: str = "*"):
+def _stub_heavy_deps() -> None:
     """
-    Import and return the FastAPI app with patched environment.
-    Each call re-imports the module so env vars take effect cleanly.
+    Stub heavy ML/LLM transitive dependencies that may not be installed in the
+    test environment.  Matches the pattern used by the existing test suite which
+    mocks _build_llm / RAGStore at higher layers.
     """
-    import importlib
-    import sys
+    stubs = [
+        "langchain_community",
+        "langchain_community.document_loaders",
+        "langchain_community.embeddings",
+        "langchain_community.vectorstores",
+        "langchain_community.chat_models",
+        "langchain_openai",
+        "langchain",
+        "langchain_core",
+        "langchain_core.messages",
+        "langchain_core.documents",
+        "langchain_text_splitters",
+        "chromadb",
+        "sentence_transformers",
+        "pypdf",
+        "unstructured",
+        "pyyaml",
+    ]
+    for stub in stubs:
+        if stub not in sys.modules:
+            sys.modules[stub] = MagicMock()  # type: ignore[assignment]
 
-    # Remove previously imported api modules so env patches apply
+    # Prefer the real yaml if present
+    try:
+        import yaml as _yaml  # noqa: PLC0415
+        sys.modules["yaml"] = _yaml
+    except ImportError:
+        pass
+
+
+def _fresh_app(api_keys: str = "", cors_origins: str = "*"):
+    """
+    Return a freshly-imported FastAPI app with the given env overrides.
+    Stubs heavy dependencies and purges previously-cached src.* modules so
+    each call gets a clean slate.
+    """
+    _stub_heavy_deps()
+
+    # Purge previously loaded src.* so env patches apply cleanly
     for mod in list(sys.modules.keys()):
-        if "src.api" in mod:
+        if mod.startswith(("src.api", "src.config", "src.bot", "src.rag")):
             del sys.modules[mod]
 
     with patch.dict(
@@ -33,36 +70,38 @@ def _make_app(api_keys: str = "", cors_origins: str = "*"):
         {
             "API_KEYS": api_keys,
             "CORS_ORIGINS": cors_origins,
-            "RATE_LIMIT_RPM": "999",  # disable rate limiting in tests
+            "RATE_LIMIT_RPM": "999",  # effectively disable rate limiting in tests
             "LOG_LEVEL": "ERROR",
         },
         clear=False,
     ):
-        from src.api.app import app as _app
+        from src.api.app import app as _app  # noqa: PLC0415
         return _app
 
 
 @pytest.fixture()
-def app_no_auth():
-    """App with auth disabled (no API_KEYS)."""
-    return _make_app(api_keys="")
+def client_no_auth():
+    """TestClient with auth disabled and lifespan fully initialised."""
+    app = _fresh_app(api_keys="")
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture()
-def app_with_auth():
-    """App with a single known API key."""
-    return _make_app(api_keys="test-secret-key")
+def client_with_auth():
+    """TestClient with a single known API key and lifespan fully initialised."""
+    app = _fresh_app(api_keys="test-secret-key")
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture()
-def mock_bot_factory():
-    """Returns a factory that produces a mock Bot."""
-    def _factory():
-        bot = MagicMock()
-        bot.ask.return_value = "Hello from the bot!"
-        bot.clear_memory.return_value = None
-        return bot
-    return _factory
+def mock_bot():
+    """Returns a mock Bot whose ask() returns a predictable string."""
+    bot = MagicMock()
+    bot.ask.return_value = "Hello from the bot!"
+    bot.clear_memory.return_value = None
+    return bot
 
 
 # ---------------------------------------------------------------------------
@@ -71,22 +110,17 @@ def mock_bot_factory():
 
 
 class TestHealthEndpoint:
-    def test_health_returns_200(self, app_no_auth):
-        client = TestClient(app_no_auth)
-        resp = client.get("/health")
-        assert resp.status_code == 200
+    def test_health_returns_200(self, client_no_auth):
+        assert client_no_auth.get("/health").status_code == 200
 
-    def test_health_body(self, app_no_auth):
-        client = TestClient(app_no_auth)
-        data = client.get("/health").json()
+    def test_health_body(self, client_no_auth):
+        data = client_no_auth.get("/health").json()
         assert data["status"] == "ok"
         assert "version" in data
 
-    def test_health_no_auth_required(self, app_with_auth):
+    def test_health_no_auth_required(self, client_with_auth):
         """Health check must not require an API key."""
-        client = TestClient(app_with_auth)
-        resp = client.get("/health")
-        assert resp.status_code == 200
+        assert client_with_auth.get("/health").status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -95,70 +129,54 @@ class TestHealthEndpoint:
 
 
 class TestChatNoAuth:
-    def test_chat_returns_reply(self, app_no_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_no_auth)
-            resp = client.post("/chat", json={"message": "Hello"})
+    def test_chat_returns_reply(self, client_no_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            resp = client_no_auth.post("/chat", json={"message": "Hello"})
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["reply"] == "Hello from the bot!"
-        assert "session_id" in data
+        assert resp.json()["reply"] == "Hello from the bot!"
 
-    def test_chat_returns_session_id(self, app_no_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_no_auth)
-            resp = client.post("/chat", json={"message": "Hi"})
+    def test_chat_returns_session_id(self, client_no_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            resp = client_no_auth.post("/chat", json={"message": "Hi"})
         assert resp.status_code == 200
-        sid = resp.json()["session_id"]
-        assert len(sid) > 0
+        assert len(resp.json()["session_id"]) > 0
 
-    def test_chat_same_session_id_reused(self, app_no_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_no_auth)
-            r1 = client.post("/chat", json={"message": "First"})
+    def test_chat_same_session_id_reused(self, client_no_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            r1 = client_no_auth.post("/chat", json={"message": "First"})
             sid = r1.json()["session_id"]
-            r2 = client.post("/chat", json={"message": "Second", "session_id": sid})
+            r2 = client_no_auth.post("/chat", json={"message": "Second", "session_id": sid})
         assert r2.status_code == 200
         assert r2.json()["session_id"] == sid
 
-    def test_chat_empty_message_rejected(self, app_no_auth):
-        client = TestClient(app_no_auth)
-        resp = client.post("/chat", json={"message": "   "})
-        assert resp.status_code == 422
+    def test_chat_empty_message_rejected(self, client_no_auth):
+        assert client_no_auth.post("/chat", json={"message": "   "}).status_code == 422
 
-    def test_chat_missing_message_rejected(self, app_no_auth):
-        client = TestClient(app_no_auth)
-        resp = client.post("/chat", json={})
-        assert resp.status_code == 422
+    def test_chat_missing_message_rejected(self, client_no_auth):
+        assert client_no_auth.post("/chat", json={}).status_code == 422
 
-    def test_chat_message_too_long_rejected(self, app_no_auth):
-        client = TestClient(app_no_auth)
-        resp = client.post("/chat", json={"message": "x" * 5000})
-        assert resp.status_code == 422
+    def test_chat_message_too_long_rejected(self, client_no_auth):
+        assert client_no_auth.post("/chat", json={"message": "x" * 5000}).status_code == 422
 
-    def test_chat_use_rag_false(self, app_no_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory) as mock_factory:
-            client = TestClient(app_no_auth)
-            resp = client.post("/chat", json={"message": "Hello", "use_rag": False})
+    def test_chat_use_rag_flag_forwarded(self, client_no_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            resp = client_no_auth.post("/chat", json={"message": "Hello", "use_rag": False})
         assert resp.status_code == 200
-        # The mock bot's ask() should have been called with use_rag=False
-        bot = mock_factory.side_effect()
-        # We can't easily assert the arg here without more plumbing; status is enough
+        # use_rag=False should be passed through to bot.ask
+        mock_bot.ask.assert_called_once_with("Hello", use_rag=False)
 
-    def test_chat_bot_error_returns_502(self, app_no_auth):
+    def test_chat_bot_error_returns_502(self, client_no_auth):
         failing_bot = MagicMock()
         failing_bot.ask.side_effect = RuntimeError("LLM timeout")
         with patch("src.api.app.get_bot", return_value=failing_bot):
-            client = TestClient(app_no_auth)
-            resp = client.post("/chat", json={"message": "Hello"})
+            resp = client_no_auth.post("/chat", json={"message": "Hello"})
         assert resp.status_code == 502
 
-    def test_chat_config_error_returns_503(self, app_no_auth):
+    def test_chat_config_error_returns_503(self, client_no_auth):
         bad_bot = MagicMock()
         bad_bot.ask.side_effect = ValueError("OPENROUTER_API_KEY not set")
         with patch("src.api.app.get_bot", return_value=bad_bot):
-            client = TestClient(app_no_auth)
-            resp = client.post("/chat", json={"message": "Hello"})
+            resp = client_no_auth.post("/chat", json={"message": "Hello"})
         assert resp.status_code == 503
 
 
@@ -168,26 +186,23 @@ class TestChatNoAuth:
 
 
 class TestChatWithAuth:
-    def test_chat_no_key_returns_401(self, app_with_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_with_auth)
-            resp = client.post("/chat", json={"message": "Hello"})
+    def test_chat_no_key_returns_401(self, client_with_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            resp = client_with_auth.post("/chat", json={"message": "Hello"})
         assert resp.status_code == 401
 
-    def test_chat_wrong_key_returns_401(self, app_with_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_with_auth)
-            resp = client.post(
+    def test_chat_wrong_key_returns_401(self, client_with_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            resp = client_with_auth.post(
                 "/chat",
                 json={"message": "Hello"},
                 headers={"X-API-Key": "wrong-key"},
             )
         assert resp.status_code == 401
 
-    def test_chat_correct_key_returns_200(self, app_with_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_with_auth)
-            resp = client.post(
+    def test_chat_correct_key_returns_200(self, client_with_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            resp = client_with_auth.post(
                 "/chat",
                 json={"message": "Hello"},
                 headers={"X-API-Key": "test-secret-key"},
@@ -201,44 +216,37 @@ class TestChatWithAuth:
 
 
 class TestSessionEndpoints:
-    def test_clear_nonexistent_session_404(self, app_no_auth):
-        client = TestClient(app_no_auth)
-        resp = client.post(f"/sessions/{uuid.uuid4()}/clear")
+    def test_clear_nonexistent_session_404(self, client_no_auth):
+        resp = client_no_auth.post(f"/sessions/{uuid.uuid4()}/clear")
         assert resp.status_code == 404
 
-    def test_delete_nonexistent_session_404(self, app_no_auth):
-        client = TestClient(app_no_auth)
-        resp = client.delete(f"/sessions/{uuid.uuid4()}")
+    def test_delete_nonexistent_session_404(self, client_no_auth):
+        resp = client_no_auth.delete(f"/sessions/{uuid.uuid4()}")
         assert resp.status_code == 404
 
-    def test_clear_existing_session_returns_200(self, app_no_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_no_auth)
-            # Create a session
-            r = client.post("/chat", json={"message": "Hi"})
+    def test_clear_existing_session_returns_200(self, client_no_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            r = client_no_auth.post("/chat", json={"message": "Hi"})
             sid = r.json()["session_id"]
-            # Clear it
-            resp = client.post(f"/sessions/{sid}/clear")
+            resp = client_no_auth.post(f"/sessions/{sid}/clear")
         assert resp.status_code == 200
         assert resp.json()["cleared"] is True
         assert resp.json()["session_id"] == sid
 
-    def test_delete_existing_session_returns_200(self, app_no_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_no_auth)
-            r = client.post("/chat", json={"message": "Hi"})
+    def test_delete_existing_session_returns_200(self, client_no_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            r = client_no_auth.post("/chat", json={"message": "Hi"})
             sid = r.json()["session_id"]
-            resp = client.delete(f"/sessions/{sid}")
+            resp = client_no_auth.delete(f"/sessions/{sid}")
         assert resp.status_code == 200
         assert resp.json()["session_id"] == sid
 
-    def test_delete_then_delete_again_returns_404(self, app_no_auth, mock_bot_factory):
-        with patch("src.api.app.get_bot", side_effect=mock_bot_factory):
-            client = TestClient(app_no_auth)
-            r = client.post("/chat", json={"message": "Hi"})
+    def test_delete_then_delete_again_returns_404(self, client_no_auth, mock_bot):
+        with patch("src.api.app.get_bot", return_value=mock_bot):
+            r = client_no_auth.post("/chat", json={"message": "Hi"})
             sid = r.json()["session_id"]
-            client.delete(f"/sessions/{sid}")
-            resp = client.delete(f"/sessions/{sid}")
+            client_no_auth.delete(f"/sessions/{sid}")
+            resp = client_no_auth.delete(f"/sessions/{sid}")
         assert resp.status_code == 404
 
 
@@ -337,3 +345,4 @@ class TestSessionStore:
         removed = store.reap_expired()
         assert removed == 1
         assert len(store) == 0
+

@@ -84,6 +84,72 @@ Set `OLLAMA_BASE_URL` in `.env` if not running on `localhost:11434`.
 
 ---
 
+## Web API (website chatbot integration)
+
+The bot can be exposed as an HTTP API and embedded directly into any website.
+
+### Start the API server
+
+```bash
+# Local dev (no auth)
+python serve.py
+
+# Production (with API key auth)
+API_KEYS=your-secret-key python serve.py --host 0.0.0.0 --port 8000
+
+# Or with docker-compose:
+docker-compose up api
+```
+
+### API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/health` | Health check — no auth required |
+| `POST` | `/chat`   | Send a message, get a reply |
+| `POST` | `/sessions/{id}/clear` | Clear conversation memory |
+| `DELETE` | `/sessions/{id}` | Delete a session |
+
+**Chat request / response example:**
+
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-key" \
+  -d '{"message": "Hello!", "session_id": null}'
+# → {"reply": "Hi there! How can I help?", "session_id": "uuid-..."}
+```
+
+Pass the returned `session_id` in subsequent requests to maintain conversation history.
+
+### Embed the chat widget
+
+Open `widget/chat.html` in a browser or embed it as an iframe:
+
+```html
+<iframe
+  src="widget/chat.html?api=https://your-api.example.com&key=YOUR_API_KEY&title=Ask+us+anything"
+  width="380" height="600" frameborder="0">
+</iframe>
+```
+
+Query parameters: `api` (required), `key` (optional), `title`, `theme` (`light`/`dark`).
+
+### Security configuration
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `API_KEYS` | *(empty — auth disabled)* | Comma-separated valid keys. **Set in production.** |
+| `CORS_ORIGINS` | `*` | Comma-separated allowed origins. Use explicit URLs in production. |
+| `RATE_LIMIT_RPM` | `30` | Max requests per minute per IP. |
+| `SESSION_TTL_SECONDS` | `1800` | Idle session timeout (seconds). |
+| `MAX_SESSIONS` | `1000` | Hard cap on concurrent sessions. |
+| `DOCS_DISABLED` | `0` | Set `1` to disable `/docs` and `/redoc` in production. |
+
+See `.env.example` for the full list.
+
+---
+
 ## Deployment
 
 ### Docker
