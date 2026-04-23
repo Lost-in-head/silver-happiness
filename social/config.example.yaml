@@ -34,3 +34,9 @@ geolocation:
   locale: en-US
   # proxy_url: http://proxy.example.com:8080   # optional; set via PROXY_URL in .env
   # proxy_username and proxy_password via env: PROXY_USERNAME, PROXY_PASSWORD
+
+# Web API — all values can be overridden by environment variables (see .env.example)
+# api:
+#   rate_limit_rpm: 30          # max requests per minute per IP (env: RATE_LIMIT_RPM)
+#   session_ttl_seconds: 1800   # idle session expiry (env: SESSION_TTL_SECONDS)
+#   max_sessions: 1000          # hard cap on concurrent sessions (env: MAX_SESSIONS)

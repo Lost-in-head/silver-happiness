@@ -4,6 +4,10 @@
 #   docker-compose run --rm bot queue --action post --prompt "Write an intro" --subreddit test
 #   docker-compose run --rm bot run --once
 #   docker-compose run --rm bot run --interval 300
+#
+# Web API:
+#   docker-compose up api         # start the HTTP API on port 8000
+#   curl http://localhost:8000/health
 
 services:
   bot:
@@ -14,3 +18,21 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     stdin_open: true
     tty: true
+
+  api:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "8000:8000"
+    entrypoint: ["python", "serve.py"]
+    command: ["--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
