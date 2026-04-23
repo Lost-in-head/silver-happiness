@@ -161,5 +161,5 @@ def start_reaper(store: SessionStore, interval: float = _REAP_INTERVAL_SECONDS) 
 
     t = threading.Thread(target=_run, daemon=True, name="session-reaper")
     t.start()
-    logger.info("Session reaper started (interval=%ds, ttl=%ds).", interval, store._ttl)
+    logger.info("Session reaper started (interval=%ss, ttl=%ss).", interval, store._ttl)
     return stop
